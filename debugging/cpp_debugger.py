@@ -3,6 +3,10 @@ import os
 import tempfile
 import sys
 
+# Define a safe temp directory inside the app
+TEMP_DIR = "/app/tmp"
+os.makedirs(TEMP_DIR, exist_ok=True)
+
 # MinGW Include Paths (Update paths based on your installation)
 MINGW_INCLUDE_PATHS = [
     "-Ic:/mingw64/include",
@@ -16,14 +20,8 @@ def clean_error_message(error):
     Clean up error messages by removing file paths and unnecessary details.
     """
     if isinstance(error, str):
-        # Remove file paths and other unnecessary details
         lines = error.split("\n")
-        cleaned_lines = []
-        for line in lines:
-            if "error:" in line:
-                # Extract the error message after "error:"
-                cleaned_line = line.split("error:")[-1].strip()
-                cleaned_lines.append(f"❌ {cleaned_line}")
+        cleaned_lines = [f"❌ {line.split('error:')[-1].strip()}" for line in lines if "error:" in line]
         return "\n".join(cleaned_lines)
     return str(error)
 
@@ -35,12 +33,10 @@ def check_cpp_syntax(code):
     temp_cpp_path = None
 
     try:
-        # Create a temporary C++ file
-        with tempfile.NamedTemporaryFile(suffix=".cpp", delete=False, mode="w") as temp_cpp:
+        with tempfile.NamedTemporaryFile(dir=TEMP_DIR, suffix=".cpp", delete=False, mode="w") as temp_cpp:
             temp_cpp_path = temp_cpp.name
             temp_cpp.write(code)
 
-        # Compile with syntax checking only
         compile_process = subprocess.run(
             ["g++", "-fsyntax-only", temp_cpp_path] + MINGW_INCLUDE_PATHS,
             capture_output=True,
@@ -48,14 +44,10 @@ def check_cpp_syntax(code):
             timeout=10
         )
 
-        # Check for syntax errors
         if compile_process.returncode != 0:
-            errors = compile_process.stderr.strip()
-            cleaned_errors = clean_error_message(errors)
-            return {"status": "syntax_error", "error": cleaned_errors}
-
+            return {"status": "syntax_error", "error": clean_error_message(compile_process.stderr.strip())}
         return {"status": "success"}
-
+    
     except subprocess.TimeoutExpired:
         return {"status": "timeout_error", "error": "Syntax check timed out"}
     except Exception as e:
@@ -67,21 +59,15 @@ def check_cpp_syntax(code):
 def run_cpp_code(code, input_data=None):
     """
     Compile and run C++ code with error handling and timeouts.
-    Ensures temporary files are removed after execution.
     """
     temp_cpp_path = None
-    temp_exe_path = None
+    temp_exe_path = os.path.join(TEMP_DIR, "temp.out")
 
     try:
-        # Create a temporary C++ file
-        with tempfile.NamedTemporaryFile(suffix=".cpp", delete=False, mode="w") as temp_cpp:
+        with tempfile.NamedTemporaryFile(dir=TEMP_DIR, suffix=".cpp", delete=False, mode="w") as temp_cpp:
             temp_cpp_path = temp_cpp.name
             temp_cpp.write(code)
 
-        # Set output filename based on OS
-        temp_exe_path = os.path.join(os.path.dirname(temp_cpp_path), "temp.exe") if sys.platform == "win32" else "temp"
-
-        # Compile the C++ code using g++
         compile_process = subprocess.run(
             ["g++", temp_cpp_path, "-o", temp_exe_path] + MINGW_INCLUDE_PATHS,
             capture_output=True,
@@ -90,11 +76,8 @@ def run_cpp_code(code, input_data=None):
         )
 
         if compile_process.returncode != 0:
-            errors = compile_process.stderr.strip()
-            cleaned_errors = clean_error_message(errors)
-            return {"status": "compile_error", "error": cleaned_errors}
+            return {"status": "compile_error", "error": clean_error_message(compile_process.stderr.strip())}
 
-        # Run the compiled program
         run_process = subprocess.run(
             [temp_exe_path],
             input=input_data,
@@ -102,23 +85,19 @@ def run_cpp_code(code, input_data=None):
             text=True,
             timeout=5
         )
-
         return {"status": "success", "output": run_process.stdout.strip()}
-
+    
     except subprocess.TimeoutExpired:
         return {"status": "timeout_error", "error": "Compilation or execution timed out"}
     except Exception as e:
         return {"status": "runtime_error", "error": str(e)}
     finally:
-        # Clean up temporary files safely
         if temp_cpp_path and os.path.exists(temp_cpp_path):
             os.remove(temp_cpp_path)
-
         if temp_exe_path and os.path.exists(temp_exe_path):
             try:
-                # Add a small delay to ensure the process is fully terminated before deletion
                 import time
-                time.sleep(0.5)  # Wait for 500ms
+                time.sleep(0.5)
                 os.remove(temp_exe_path)
             except PermissionError:
                 print(f"Warning: Could not delete {temp_exe_path}, file may still be in use.")

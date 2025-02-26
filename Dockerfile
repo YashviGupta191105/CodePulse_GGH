@@ -10,6 +10,9 @@ COPY . .
 # Install system dependencies for C++ debugging
 RUN apt update && apt install -y g++ cmake
 
+# Create a tmp directory inside the container
+RUN mkdir -p /app/tmp && chmod -R 777 /app/tmp
+
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
